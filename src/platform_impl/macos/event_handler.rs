@@ -1,28 +1,22 @@
 use std::cell::RefCell;
 use std::{fmt, mem};
 
-use super::app_delegate::HandlePendingUserEvents;
-use crate::event::Event;
+use crate::application::ApplicationHandler;
 use crate::event_loop::ActiveEventLoop as RootActiveEventLoop;
 
-struct EventHandlerData {
-    #[allow(clippy::type_complexity)]
-    handler: Box<dyn FnMut(Event<HandlePendingUserEvents>, &RootActiveEventLoop) + 'static>,
-}
-
-impl fmt::Debug for EventHandlerData {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EventHandlerData").finish_non_exhaustive()
-    }
-}
-
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct EventHandler {
     /// This can be in the following states:
     /// - Not registered by the event loop (None).
     /// - Present (Some(handler)).
     /// - Currently executing the handler / in use (RefCell borrowed).
-    inner: RefCell<Option<EventHandlerData>>,
+    inner: RefCell<Option<&'static mut dyn ApplicationHandler>>,
+}
+
+impl fmt::Debug for EventHandler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EventHandler").finish_non_exhaustive()
+    }
 }
 
 impl EventHandler {
@@ -33,7 +27,7 @@ impl EventHandler {
     /// from within the closure.
     pub(crate) fn set<'handler, R>(
         &self,
-        handler: impl FnMut(Event<HandlePendingUserEvents>, &RootActiveEventLoop) + 'handler,
+        app: &'handler mut dyn ApplicationHandler,
         closure: impl FnOnce() -> R,
     ) -> R {
         // SAFETY: We extend the lifetime of the handler here so that we can
@@ -44,9 +38,9 @@ impl EventHandler {
         // extended beyond `'handler`.
         let handler = unsafe {
             mem::transmute::<
-                Box<dyn FnMut(Event<HandlePendingUserEvents>, &RootActiveEventLoop) + 'handler>,
-                Box<dyn FnMut(Event<HandlePendingUserEvents>, &RootActiveEventLoop) + 'static>,
-            >(Box::new(handler))
+                &'handler mut dyn ApplicationHandler,
+                &'static mut dyn ApplicationHandler,
+            >(app)
         };
 
         match self.inner.try_borrow_mut().as_deref_mut() {
@@ -54,7 +48,7 @@ impl EventHandler {
                 unreachable!("tried to set handler while another was already set");
             },
             Ok(data @ None) => {
-                *data = Some(EventHandlerData { handler });
+                *data = Some(handler);
             },
             Err(_) => {
                 unreachable!("tried to set handler that is currently in use");
@@ -105,20 +99,20 @@ impl EventHandler {
         matches!(self.inner.try_borrow().as_deref(), Ok(Some(_)))
     }
 
-    pub(crate) fn handle_event(
+    pub(crate) fn with_user_app<F: FnOnce(&mut dyn ApplicationHandler, &RootActiveEventLoop)>(
         &self,
-        event: Event<HandlePendingUserEvents>,
+        callback: F,
         event_loop: &RootActiveEventLoop,
     ) {
         match self.inner.try_borrow_mut().as_deref_mut() {
-            Ok(Some(EventHandlerData { handler })) => {
+            Ok(Some(user_app)) => {
                 // It is important that we keep the reference borrowed here,
                 // so that `in_use` can properly detect that the handler is
                 // still in use.
                 //
                 // If the handler unwinds, the `RefMut` will ensure that the
                 // handler is no longer borrowed.
-                (handler)(event, event_loop);
+                callback(*user_app, event_loop);
             },
             Ok(None) => {
                 // `NSApplication`, our app delegate and this handler are all

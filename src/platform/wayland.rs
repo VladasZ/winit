@@ -44,7 +44,7 @@ pub trait EventLoopBuilderExtWayland {
     fn with_any_thread(&mut self, any_thread: bool) -> &mut Self;
 }
 
-impl<T> EventLoopBuilderExtWayland for EventLoopBuilder<T> {
+impl EventLoopBuilderExtWayland for EventLoopBuilder {
     #[inline]
     fn with_wayland(&mut self) -> &mut Self {
         self.platform_specific.forced_backend = Some(crate::platform_impl::Backend::Wayland);

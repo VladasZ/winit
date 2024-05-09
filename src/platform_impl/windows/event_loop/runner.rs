@@ -16,11 +16,11 @@ use crate::window::WindowId;
 
 use super::ControlFlow;
 
-pub(crate) type EventLoopRunnerShared<T> = Rc<EventLoopRunner<T>>;
+pub(crate) type EventLoopRunnerShared = Rc<EventLoopRunner>;
 
-type EventHandler<T> = Cell<Option<Box<dyn FnMut(Event<T>)>>>;
+type EventHandler = Cell<Option<Box<dyn FnMut(Event)>>>;
 
-pub(crate) struct EventLoopRunner<T: 'static> {
+pub(crate) struct EventLoopRunner {
     // The event loop's win32 handles
     pub(super) thread_msg_target: HWND,
 
@@ -33,8 +33,8 @@ pub(crate) struct EventLoopRunner<T: 'static> {
     exit: Cell<Option<i32>>,
     runner_state: Cell<RunnerState>,
     last_events_cleared: Cell<Instant>,
-    event_handler: EventHandler<T>,
-    event_buffer: RefCell<VecDeque<BufferedEvent<T>>>,
+    event_handler: EventHandler,
+    event_buffer: RefCell<VecDeque<BufferedEvent>>,
 
     panic_error: Cell<Option<PanicError>>,
 }
@@ -55,13 +55,13 @@ pub(crate) enum RunnerState {
     Destroyed,
 }
 
-enum BufferedEvent<T: 'static> {
-    Event(Event<T>),
+enum BufferedEvent {
+    Event(Event),
     ScaleFactorChanged(WindowId, f64, PhysicalSize<u32>),
 }
 
-impl<T> EventLoopRunner<T> {
-    pub(crate) fn new(thread_msg_target: HWND) -> EventLoopRunner<T> {
+impl EventLoopRunner {
+    pub(crate) fn new(thread_msg_target: HWND) -> EventLoopRunner {
         EventLoopRunner {
             thread_msg_target,
             interrupt_msg_dispatch: Cell::new(false),
@@ -88,13 +88,12 @@ impl<T> EventLoopRunner<T> {
     /// undefined behaviour.
     pub(crate) unsafe fn set_event_handler<F>(&self, f: F)
     where
-        F: FnMut(Event<T>),
+        F: FnMut(Event),
     {
         // Erase closure lifetime.
         // SAFETY: Caller upholds that the lifetime of the closure is upheld.
-        let f = unsafe {
-            mem::transmute::<Box<dyn FnMut(Event<T>)>, Box<dyn FnMut(Event<T>)>>(Box::new(f))
-        };
+        let f =
+            unsafe { mem::transmute::<Box<dyn FnMut(Event)>, Box<dyn FnMut(Event)>>(Box::new(f)) };
         let old_event_handler = self.event_handler.replace(Some(f));
         assert!(old_event_handler.is_none());
     }
@@ -124,7 +123,7 @@ impl<T> EventLoopRunner<T> {
 }
 
 /// State retrieval functions.
-impl<T> EventLoopRunner<T> {
+impl EventLoopRunner {
     #[allow(unused)]
     pub fn thread_msg_target(&self) -> HWND {
         self.thread_msg_target
@@ -166,7 +165,7 @@ impl<T> EventLoopRunner<T> {
 }
 
 /// Misc. functions
-impl<T> EventLoopRunner<T> {
+impl EventLoopRunner {
     pub fn catch_unwind<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
         let panic_error = self.panic_error.take();
         if panic_error.is_none() {
@@ -196,7 +195,7 @@ impl<T> EventLoopRunner<T> {
 }
 
 /// Event dispatch functions.
-impl<T> EventLoopRunner<T> {
+impl EventLoopRunner {
     pub(crate) fn prepare_wait(&self) {
         self.move_state_to(RunnerState::Idle);
     }
@@ -205,8 +204,8 @@ impl<T> EventLoopRunner<T> {
         self.move_state_to(RunnerState::HandlingMainEvents);
     }
 
-    pub(crate) fn send_event(&self, event: Event<T>) {
-        if let Event::WindowEvent { event: WindowEvent::RedrawRequested, .. } = event {
+    pub(crate) fn send_event(&self, event: Event) {
+        if let Event::Window { event: WindowEvent::RedrawRequested, .. } = event {
             self.call_event_handler(event);
             // As a rule, to ensure that `pump_events` can't block an external event loop
             // for too long, we always guarantee that `pump_events` will return control to
@@ -226,7 +225,7 @@ impl<T> EventLoopRunner<T> {
         self.move_state_to(RunnerState::Destroyed);
     }
 
-    fn call_event_handler(&self, event: Event<T>) {
+    fn call_event_handler(&self, event: Event) {
         self.catch_unwind(|| {
             let mut event_handler = self.event_handler.take().expect(
                 "either event handler is re-entrant (likely), or no event handler is registered \
@@ -358,10 +357,10 @@ impl<T> EventLoopRunner<T> {
     }
 }
 
-impl<T> BufferedEvent<T> {
-    pub fn from_event(event: Event<T>) -> BufferedEvent<T> {
+impl BufferedEvent {
+    pub fn from_event(event: Event) -> BufferedEvent {
         match event {
-            Event::WindowEvent {
+            Event::Window {
                 event: WindowEvent::ScaleFactorChanged { scale_factor, inner_size_writer },
                 window_id,
             } => BufferedEvent::ScaleFactorChanged(
@@ -373,12 +372,12 @@ impl<T> BufferedEvent<T> {
         }
     }
 
-    pub fn dispatch_event(self, dispatch: impl FnOnce(Event<T>)) {
+    pub fn dispatch_event(self, dispatch: impl FnOnce(Event)) {
         match self {
             Self::Event(event) => dispatch(event),
             Self::ScaleFactorChanged(window_id, scale_factor, new_inner_size) => {
                 let user_new_innner_size = Arc::new(Mutex::new(new_inner_size));
-                dispatch(Event::WindowEvent {
+                dispatch(Event::Window {
                     window_id,
                     event: WindowEvent::ScaleFactorChanged {
                         scale_factor,

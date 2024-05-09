@@ -82,11 +82,11 @@ pub trait ApplicationHandler<T: 'static = ()> {
     /// [`Suspended`]: Self::suspended
     fn resumed(&mut self, event_loop: &ActiveEventLoop);
 
-    /// Emitted when an event is sent from [`EventLoopProxy::send_event`].
+    /// Called when user requested wake up via [`wake_up`] occurs.
     ///
-    /// [`EventLoopProxy::send_event`]: crate::event_loop::EventLoopProxy::send_event
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: T) {
-        let _ = (event_loop, event);
+    /// [`wake_up`]: crate::event_loop::EventLoopProxy::wake_up
+    fn user_wake_up(&mut self, event_loop: &ActiveEventLoop) {
+        let _ = event_loop;
     }
 
     /// Emitted when the OS sends an event to a winit window.

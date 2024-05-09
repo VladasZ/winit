@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
 use std::rc::Weak;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -16,8 +17,9 @@ use super::event_loop::{stop_app_immediately, ActiveEventLoop, PanicInfo};
 use super::observer::{EventLoopWaker, RunLoop};
 use super::window::WinitWindow;
 use super::{menu, WindowId, DEVICE_ID};
+use crate::application::ApplicationHandler;
 use crate::dpi::PhysicalSize;
-use crate::event::{DeviceEvent, Event, InnerSizeWriter, StartCause, WindowEvent};
+use crate::event::{DeviceEvent, InnerSizeWriter, StartCause, WindowEvent};
 use crate::event_loop::{ActiveEventLoop as RootActiveEventLoop, ControlFlow};
 use crate::window::WindowId as RootWindowId;
 
@@ -35,6 +37,7 @@ pub(super) struct State {
     activation_policy: Policy,
     default_menu: bool,
     activate_ignoring_other_apps: bool,
+    user_wake_up: Arc<AtomicBool>,
     event_handler: EventHandler,
     stop_on_launch: Cell<bool>,
     stop_before_wait: Cell<bool>,
@@ -131,11 +134,13 @@ impl ApplicationDelegate {
     pub(super) fn new(
         mtm: MainThreadMarker,
         activation_policy: NSApplicationActivationPolicy,
+        user_wake_up: Arc<AtomicBool>,
         default_menu: bool,
         activate_ignoring_other_apps: bool,
     ) -> Id<Self> {
         let this = mtm.alloc().set_ivars(State {
             activation_policy: Policy(activation_policy),
+            user_wake_up,
             default_menu,
             activate_ignoring_other_apps,
             ..Default::default()
@@ -159,7 +164,7 @@ impl ApplicationDelegate {
     /// of the given closure.
     pub fn set_event_handler<R>(
         &self,
-        handler: impl FnMut(Event<HandlePendingUserEvents>, &RootActiveEventLoop),
+        handler: &mut dyn ApplicationHandler,
         closure: impl FnOnce() -> R,
     ) -> R {
         self.ivars().event_handler.set(handler, closure)
@@ -193,8 +198,9 @@ impl ApplicationDelegate {
     /// NOTE: that if the `NSApplication` has been launched then that state is preserved,
     /// and we won't need to re-launch the app if subsequent EventLoops are run.
     pub fn internal_exit(&self) {
-        self.handle_event(Event::LoopExiting);
-
+        self.with_user_app(|app, event_loop| {
+            app.exiting(event_loop);
+        });
         self.set_is_running(false);
         self.set_stop_on_redraw(false);
         self.set_stop_before_wait(false);
@@ -235,14 +241,11 @@ impl ApplicationDelegate {
     }
 
     pub fn queue_window_event(&self, window_id: WindowId, event: WindowEvent) {
-        self.ivars()
-            .pending_events
-            .borrow_mut()
-            .push_back(QueuedEvent::WindowEvent(window_id, event));
+        self.ivars().pending_events.borrow_mut().push_back(QueuedEvent::Window(window_id, event));
     }
 
     pub fn queue_device_event(&self, event: DeviceEvent) {
-        self.ivars().pending_events.borrow_mut().push_back(QueuedEvent::DeviceEvent(event));
+        self.ivars().pending_events.borrow_mut().push_back(QueuedEvent::Device(event));
     }
 
     pub fn queue_static_scale_factor_changed_event(
@@ -263,9 +266,8 @@ impl ApplicationDelegate {
         // Redraw request might come out of order from the OS.
         // -> Don't go back into the event handler when our callstack originates from there
         if !self.ivars().event_handler.in_use() {
-            self.handle_event(Event::WindowEvent {
-                window_id: RootWindowId(window_id),
-                event: WindowEvent::RedrawRequested,
+            self.with_user_app(|app, event_loop| {
+                app.window_event(event_loop, RootWindowId(window_id), WindowEvent::RedrawRequested);
             });
 
             // `pump_events` will request to stop immediately _after_ dispatching RedrawRequested
@@ -286,16 +288,20 @@ impl ApplicationDelegate {
         unsafe { RunLoop::get() }.wakeup();
     }
 
-    fn handle_event(&self, event: Event<HandlePendingUserEvents>) {
-        self.ivars().event_handler.handle_event(event, &ActiveEventLoop::new_root(self.retain()))
+    fn with_user_app<F: FnOnce(&mut dyn ApplicationHandler, &RootActiveEventLoop) -> ()>(
+        &self,
+        callback: F,
+    ) {
+        let event_loop = ActiveEventLoop::new_root(self.retain());
+        self.ivars().event_handler.with_user_app(callback, &event_loop);
     }
 
     /// dispatch `NewEvents(Init)` + `Resumed`
     pub fn dispatch_init_events(&self) {
-        self.handle_event(Event::NewEvents(StartCause::Init));
+        self.with_user_app(|app, event_loop| app.new_events(event_loop, StartCause::Init));
         // NB: For consistency all platforms must emit a 'resumed' event even though macOS
         // applications don't themselves have a formal suspend/resume lifecycle.
-        self.handle_event(Event::Resumed);
+        self.with_user_app(|app, event_loop| app.resumed(event_loop));
     }
 
     // Called by RunLoopObserver after finishing waiting for new events
@@ -328,7 +334,7 @@ impl ApplicationDelegate {
             },
         };
 
-        self.handle_event(Event::NewEvents(cause));
+        self.with_user_app(|app, event_loop| app.new_events(event_loop, cause));
     }
 
     // Called by RunLoopObserver before waiting for new events
@@ -345,33 +351,34 @@ impl ApplicationDelegate {
             return;
         }
 
-        self.handle_event(Event::UserEvent(HandlePendingUserEvents));
+        if self.ivars().user_wake_up.swap(false, AtomicOrdering::Relaxed) {
+            self.with_user_app(|app, event_loop| app.user_wake_up(event_loop));
+        }
 
         let events = mem::take(&mut *self.ivars().pending_events.borrow_mut());
         for event in events {
             match event {
-                QueuedEvent::WindowEvent(window_id, event) => {
-                    self.handle_event(Event::WindowEvent {
-                        window_id: RootWindowId(window_id),
-                        event,
+                QueuedEvent::Window(window_id, event) => {
+                    self.with_user_app(|app, event_loop| {
+                        app.window_event(event_loop, RootWindowId(window_id), event)
                     });
                 },
-                QueuedEvent::DeviceEvent(event) => {
-                    self.handle_event(Event::DeviceEvent { device_id: DEVICE_ID, event });
+                QueuedEvent::Device(event) => {
+                    self.with_user_app(|app, event_loop| {
+                        app.device_event(event_loop, DEVICE_ID, event)
+                    });
                 },
                 QueuedEvent::ScaleFactorChanged { window, suggested_size, scale_factor } => {
                     let new_inner_size = Arc::new(Mutex::new(suggested_size));
-                    let scale_factor_changed_event = Event::WindowEvent {
-                        window_id: RootWindowId(window.id()),
-                        event: WindowEvent::ScaleFactorChanged {
-                            scale_factor,
-                            inner_size_writer: InnerSizeWriter::new(Arc::downgrade(
-                                &new_inner_size,
-                            )),
-                        },
-                    };
 
-                    self.handle_event(scale_factor_changed_event);
+                    let event = WindowEvent::ScaleFactorChanged {
+                        scale_factor,
+                        inner_size_writer: InnerSizeWriter::new(Arc::downgrade(&new_inner_size)),
+                    };
+                    let window_id = RootWindowId(window.id());
+                    self.with_user_app(|app, event_loop| {
+                        app.window_event(event_loop, window_id, event)
+                    });
 
                     let physical_size = *new_inner_size.lock().unwrap();
                     drop(new_inner_size);
@@ -379,24 +386,24 @@ impl ApplicationDelegate {
                     let size = NSSize::new(logical_size.width, logical_size.height);
                     window.setContentSize(size);
 
-                    let resized_event = Event::WindowEvent {
-                        window_id: RootWindowId(window.id()),
-                        event: WindowEvent::Resized(physical_size),
-                    };
-                    self.handle_event(resized_event);
+                    let event = WindowEvent::Resized(physical_size);
+                    self.with_user_app(|app, event_loop| {
+                        app.window_event(event_loop, window_id, event)
+                    });
                 },
             }
         }
 
         let redraw = mem::take(&mut *self.ivars().pending_redraw.borrow_mut());
         for window_id in redraw {
-            self.handle_event(Event::WindowEvent {
-                window_id: RootWindowId(window_id),
-                event: WindowEvent::RedrawRequested,
+            self.with_user_app(|app, event_loop| {
+                app.window_event(event_loop, RootWindowId(window_id), WindowEvent::RedrawRequested);
             });
         }
 
-        self.handle_event(Event::AboutToWait);
+        self.with_user_app(|app, event_loop| {
+            app.about_to_wait(event_loop);
+        });
 
         if self.exiting() {
             let app = NSApplication::sharedApplication(mtm);
@@ -420,17 +427,14 @@ impl ApplicationDelegate {
 
 #[derive(Debug)]
 pub(crate) enum QueuedEvent {
-    WindowEvent(WindowId, WindowEvent),
-    DeviceEvent(DeviceEvent),
+    Window(WindowId, WindowEvent),
+    Device(DeviceEvent),
     ScaleFactorChanged {
         window: Id<WinitWindow>,
         suggested_size: PhysicalSize<u32>,
         scale_factor: f64,
     },
 }
-
-#[derive(Debug)]
-pub(crate) struct HandlePendingUserEvents;
 
 /// Returns the minimum `Option<Instant>`, taking into account that `None`
 /// equates to an infinite timeout, not a zero timeout (so can't just use

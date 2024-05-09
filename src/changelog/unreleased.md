@@ -44,11 +44,19 @@ changelog entry.
 
 - Reexport `raw-window-handle` versions 0.4 and 0.5 as `raw_window_handle_04` and `raw_window_handle_05`.
 
+### Changed
+
+- `ApplicationHandler::user_event` changed to `user_wake_up` removing the
+  generic user event. Users are now free to use their own ways of polling
+  events where winit will just indicate that wake up happened.
+- `EventLoopProxy::send_event` to `EventLoopProxy::wake_up` to just wake up the loop.
+
 ### Removed
 
 - Remove `EventLoop::run`.
 - Remove `EventLoopExtRunOnDemand::run_on_demand`.
 - Remove `EventLoopExtPumpEvents::pump_events`.
+- Remove `Event`.
 
 ### Fixed
 

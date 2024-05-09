@@ -59,7 +59,7 @@ declare_class!(
                         let ptr: *const WinitUIWindow = ptr.cast();
                         &*ptr
                     };
-                    events.push(EventWrapper::StaticEvent(Event::WindowEvent {
+                    events.push(EventWrapper::StaticEvent(Event::Window {
                         window_id: RootWindowId(window.id()),
                         event: WindowEvent::Destroyed,
                     }));
@@ -89,7 +89,7 @@ impl AppDelegate {
                     let ptr: *const WinitUIWindow = ptr.cast();
                     &*ptr
                 };
-                events.push(EventWrapper::StaticEvent(Event::WindowEvent {
+                events.push(EventWrapper::StaticEvent(Event::Window {
                     window_id: RootWindowId(window.id()),
                     event: WindowEvent::Occluded(occluded),
                 }));
