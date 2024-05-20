@@ -288,7 +288,7 @@ impl ApplicationDelegate {
         unsafe { RunLoop::get() }.wakeup();
     }
 
-    fn with_user_app<F: FnOnce(&mut dyn ApplicationHandler, &RootActiveEventLoop) -> ()>(
+    fn with_user_app<F: FnOnce(&mut dyn ApplicationHandler, &RootActiveEventLoop)>(
         &self,
         callback: F,
     ) {

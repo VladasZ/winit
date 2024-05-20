@@ -1021,7 +1021,7 @@ mod tests {
                 x(Resumed);
 
                 // Window events.
-                let with_window_event = |wev| x(WindowEvent { window_id: wid, event: wev });
+                let with_window_event = |wev| x(Window { window_id: wid, event: wev });
 
                 with_window_event(CloseRequested);
                 with_window_event(Destroyed);

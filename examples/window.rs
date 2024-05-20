@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // from a different thread.
         info!("Starting to send user event every second");
         loop {
-            let _ = _event_loop_proxy.wake_up();
+            _event_loop_proxy.wake_up();
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
     });

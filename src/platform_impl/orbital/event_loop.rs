@@ -596,7 +596,7 @@ impl EventLoop {
                 i += 1;
             }
 
-            while let Ok(_) = self.user_events_receiver.try_recv() {
+            while self.user_events_receiver.try_recv().is_ok() {
                 app.user_wake_up(&self.window_target);
             }
 

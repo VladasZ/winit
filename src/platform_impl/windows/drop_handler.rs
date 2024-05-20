@@ -37,7 +37,7 @@ pub struct FileDropHandler {
 
 #[allow(non_snake_case)]
 impl FileDropHandler {
-    pub fn new(window: HWND, send_event: Box<dyn Fn(Event)>) -> FileDropHandler {
+    pub(crate) fn new(window: HWND, send_event: Box<dyn Fn(Event)>) -> FileDropHandler {
         let data = Box::new(FileDropHandlerData {
             interface: IDropTarget { lpVtbl: &DROP_TARGET_VTBL as *const IDropTargetVtbl },
             refcount: AtomicUsize::new(1),
