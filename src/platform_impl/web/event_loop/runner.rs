@@ -133,7 +133,7 @@ impl Shared {
         let document = window.document().expect("Failed to obtain document");
 
         Shared(Rc::<Execution>::new_cyclic(|weak| {
-            let proxy_spawner = WakerSpawner::new(main_thread, weak.clone(), |runner, _count| {
+            let proxy_spawner = WakerSpawner::new(main_thread, weak.clone(), |runner| {
                 if let Some(runner) = runner.upgrade() {
                     Shared(runner).send_event(Event::UserWakeUp);
                 }
@@ -197,7 +197,7 @@ impl Shared {
     // Set the event callback to use for the event loop runner
     // This the event callback is a fairly thin layer over the user-provided callback that closes
     // over a RootActiveEventLoop reference
-    pub fn set_listener(&self, event_handler: Box<EventHandler>) {
+    pub(crate) fn set_listener(&self, event_handler: Box<EventHandler>) {
         {
             let mut runner = self.0.runner.borrow_mut();
             assert!(matches!(*runner, RunnerEnum::Pending));
@@ -602,8 +602,10 @@ impl Shared {
 
                 // Pre-fetch `UserEvent`s to avoid having to wait until the next event loop cycle.
                 events.extend(
-                    iter::repeat(Event::UserWakeUp)
-                        .take(self.0.proxy_spawner.fetch())
+                    self.0
+                        .proxy_spawner
+                        .take()
+                        .then_some(Event::UserWakeUp)
                         .map(EventWrapper::from),
                 );
 
