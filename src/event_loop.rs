@@ -524,6 +524,8 @@ impl EventLoopProxy {
     ///
     /// When multiple wake ups are sent they'll result only in a single [`user_wake_up`] call.
     ///
+    /// If the event loop has is no longer running, this is effectively a no-op.
+    ///
     /// [`user_wake_up`]: crate::application::ApplicationHandler::user_wake_up
     pub fn wake_up(&self) {
         self.event_loop_proxy.wake_up();

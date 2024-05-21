@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{mem, panic};
@@ -15,8 +14,6 @@ use crate::platform_impl::platform::get_window_long;
 use crate::window::WindowId;
 
 use super::ControlFlow;
-
-pub(crate) type EventLoopRunnerShared = Rc<EventLoopRunner>;
 
 type EventHandler = Cell<Option<Box<dyn FnMut(Event)>>>;
 

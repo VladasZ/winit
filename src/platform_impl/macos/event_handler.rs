@@ -15,7 +15,12 @@ pub(crate) struct EventHandler {
 
 impl fmt::Debug for EventHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EventHandler").finish_non_exhaustive()
+        let state = match self.inner.try_borrow().as_deref() {
+            Ok(Some(_)) => "<available>",
+            Ok(None) => "<not set>",
+            Err(_) => "<in use>",
+        };
+        f.debug_struct("EventHandler").field("state", &state).finish_non_exhaustive()
     }
 }
 

@@ -46,10 +46,14 @@ changelog entry.
 
 ### Changed
 
-- `ApplicationHandler::user_event` changed to `user_wake_up` removing the
-  generic user event. Users are now free to use their own ways of polling
-  events where winit will just indicate that wake up happened.
-- `EventLoopProxy::send_event` to `EventLoopProxy::wake_up` to just wake up the loop.
+- Changed `ApplicationHandler::user_event` to `user_wake_up`, removing the
+  generic user event.
+
+  Winit will now only indicate that wake up happened, you will have to pair
+  this with an external mechanism like `std::sync::mpsc::channel` if you want
+  to send specific data to be processed on the main thread.
+- Changed `EventLoopProxy::send_event` to `EventLoopProxy::wake_up`, it now
+  only wakes up the loop.
 
 ### Removed
 

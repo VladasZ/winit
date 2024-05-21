@@ -83,21 +83,14 @@ use crate::platform_impl::platform::{
 use crate::window::{
     CustomCursor as RootCustomCursor, CustomCursorSource, WindowId as RootWindowId,
 };
-use runner::{EventLoopRunner, EventLoopRunnerShared};
+use runner::EventLoopRunner;
 
 use super::window::set_skip_taskbar;
 use super::SelectedCursor;
 
-// here below, the generic `EventLoopRunnerShared<T>` is replaced with
-// `EventLoopRunnerShared<UserEventPlaceholder>` so we can get rid
-// of the generic parameter T in types which don't depend on T.
-// this is the approach which requires minimum changes to current
-// backend implementation. it should be considered transitional
-// and should be refactored and cleaned up eventually, I hope.
-
 pub(crate) struct WindowData {
     pub window_state: Arc<Mutex<WindowState>>,
-    pub event_loop_runner: EventLoopRunnerShared,
+    pub event_loop_runner: Rc<EventLoopRunner>,
     pub key_event_builder: KeyEventBuilder,
     pub _file_drop_handler: Option<FileDropHandler>,
     pub userdata_removed: Cell<bool>,
@@ -115,7 +108,7 @@ impl WindowData {
 }
 
 struct ThreadMsgTargetData {
-    event_loop_runner: EventLoopRunnerShared,
+    event_loop_runner: Rc<EventLoopRunner>,
 }
 
 impl ThreadMsgTargetData {
@@ -151,7 +144,7 @@ impl Default for PlatformSpecificEventLoopAttributes {
 pub struct ActiveEventLoop {
     thread_id: u32,
     thread_msg_target: HWND,
-    pub(crate) runner_shared: EventLoopRunnerShared,
+    pub(crate) runner_shared: Rc<EventLoopRunner>,
 }
 
 impl EventLoop {
@@ -847,7 +840,7 @@ fn create_event_target_window() -> HWND {
 
 fn insert_event_target_window_data(
     thread_msg_target: HWND,
-    event_loop_runner: EventLoopRunnerShared,
+    event_loop_runner: Rc<EventLoopRunner>,
 ) {
     let userdata = ThreadMsgTargetData { event_loop_runner };
     let input_ptr = Box::into_raw(Box::new(userdata));
