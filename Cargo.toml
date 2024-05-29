@@ -76,7 +76,7 @@ image = { version = "0.24.0", default-features = false, features = ["png"] }
 simple_logger = { version = "4.2.0", default_features = false }
 winit = { path = ".", features = ["rwh_05"] }
 
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dev-dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos", target_os = "watchos")))'.dev-dependencies]
 softbuffer = "0.3.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -84,7 +84,7 @@ android-activity = "0.5.0"
 ndk = { version = "0.8.0", default-features = false }
 ndk-sys = "0.5.0"
 
-[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "tvos", target_os = "watchos", target_os = "macos"))'.dependencies]
 core-foundation = "0.9.3"
 objc2 = "0.4.1"
 
@@ -110,6 +110,36 @@ features = [
 [target.'cfg(target_os = "ios")'.dependencies.icrate]
 version = "0.0.4"
 features = [
+    "NSAppearance",
+    "NSApplication",
+    "NSBitmapImageRep",
+    "NSButton",
+    "NSControl",
+    "NSCursor",
+    "NSDragging",
+    "NSEvent",
+    "NSGraphics",
+    "NSGraphicsContext",
+    "NSImage",
+    "NSImageRep",
+    "NSMenu",
+    "NSMenuItem",
+    "NSOpenGLView",
+    "NSPasteboard",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSScreen",
+    "NSTextInputClient",
+    "NSTextInputContext",
+    "NSView",
+    "NSWindow",
+    "NSWindowScripting",
+    "NSWindowTabGroup",
+]
+
+[target.'cfg(target_os = "ios")'.dependencies.objc2-foundation]
+version = "0.2.2"
+features = [
     "dispatch",
     "Foundation",
     "Foundation_NSArray",
@@ -117,6 +147,29 @@ features = [
     "Foundation_NSProcessInfo",
     "Foundation_NSThread",
     "Foundation_NSSet",
+]
+
+[target.'cfg(target_os = "ios")'.dependencies.objc2-ui-kit]
+version = "0.2.2"
+features = [
+    "UIApplication",
+    "UIDevice",
+    "UIEvent",
+    "UIGeometry",
+    "UIGestureRecognizer",
+    "UIOrientation",
+    "UIPanGestureRecognizer",
+    "UIPinchGestureRecognizer",
+    "UIResponder",
+    "UIRotationGestureRecognizer",
+    "UIScreen",
+    "UIScreenMode",
+    "UITapGestureRecognizer",
+    "UITouch",
+    "UITraitCollection",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
 ]
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -152,7 +205,7 @@ features = [
 ]
 
 [target.'cfg(all(unix, not(any(target_os = "redox", target_family = "wasm", target_os = "android", target_os = "ios", target_os = "macos"))))'.dependencies]
-ahash = { version = "0.8.3", features = ["no-rng"], optional = true }
+ahash = { version = "0.8.7", features = ["no-rng"], optional = true }
 bytemuck = { version = "1.13.1", default-features = false, optional = true }
 calloop = "0.12.3"
 libc = "0.2.64"
@@ -224,3 +277,13 @@ web-sys = { version = "0.3.22", features = ['CanvasRenderingContext2d'] }
 members = [
     "run-wasm",
 ]
+
+[workspace.package]
+rust-version = "1.70.0"
+repository = "https://github.com/rust-windowing/winit"
+license = "Apache-2.0"
+edition = "2021"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["serde_derive"] }
+mint = "0.5.6"
