@@ -72,6 +72,8 @@ declare_class!(
 impl WinitViewController {
     pub(crate) fn set_prefers_status_bar_hidden(&self, val: bool) {
         self.ivars().prefers_status_bar_hidden.set(val);
+        // The status bar selectors are marked unavailable on tvOS in the SDK.
+        #[cfg(not(target_os = "tvos"))]
         self.setNeedsStatusBarAppearanceUpdate();
     }
 
@@ -82,16 +84,22 @@ impl WinitViewController {
             StatusBarStyle::DarkContent => UIStatusBarStyle::DarkContent,
         };
         self.ivars().preferred_status_bar_style.set(val);
+        #[cfg(not(target_os = "tvos"))]
         self.setNeedsStatusBarAppearanceUpdate();
     }
 
     pub(crate) fn set_prefers_home_indicator_auto_hidden(&self, val: bool) {
         self.ivars().prefers_home_indicator_auto_hidden.set(val);
-        let os_capabilities = app_state::os_capabilities();
-        if os_capabilities.home_indicator_hidden {
-            self.setNeedsUpdateOfHomeIndicatorAutoHidden();
-        } else {
-            os_capabilities.home_indicator_hidden_err_msg("ignoring")
+        // setNeedsUpdateOfHomeIndicatorAutoHidden does not exist on tvOS. The
+        // version guard below cannot catch that, it only checks iOS versions.
+        #[cfg(not(target_os = "tvos"))]
+        {
+            let os_capabilities = app_state::os_capabilities();
+            if os_capabilities.home_indicator_hidden {
+                self.setNeedsUpdateOfHomeIndicatorAutoHidden();
+            } else {
+                os_capabilities.home_indicator_hidden_err_msg("ignoring")
+            }
         }
     }
 
@@ -101,11 +109,14 @@ impl WinitViewController {
             UIRectEdge(val.bits().into())
         };
         self.ivars().preferred_screen_edges_deferring_system_gestures.set(val);
-        let os_capabilities = app_state::os_capabilities();
-        if os_capabilities.defer_system_gestures {
-            self.setNeedsUpdateOfScreenEdgesDeferringSystemGestures();
-        } else {
-            os_capabilities.defer_system_gestures_err_msg("ignoring")
+        #[cfg(not(target_os = "tvos"))]
+        {
+            let os_capabilities = app_state::os_capabilities();
+            if os_capabilities.defer_system_gestures {
+                self.setNeedsUpdateOfScreenEdgesDeferringSystemGestures();
+            } else {
+                os_capabilities.defer_system_gestures_err_msg("ignoring")
+            }
         }
     }
 
@@ -129,6 +140,7 @@ impl WinitViewController {
             },
         };
         self.ivars().supported_orientations.set(mask);
+        #[cfg(not(target_os = "tvos"))]
         #[allow(deprecated)]
         UIViewController::attemptRotationToDeviceOrientation(mtm);
     }
