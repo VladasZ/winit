@@ -1,5 +1,5 @@
 [package]
-name = "winit"
+name = "hilen-winit"
 version = "0.30.13"
 authors = [
     "The winit contributors",
@@ -369,7 +369,7 @@ members = ["dpi"]
 
 [workspace.package]
 rust-version = "1.70.0"
-repository = "https://github.com/rust-windowing/winit"
+repository = "https://github.com/VladasZ/winit"
 license = "Apache-2.0"
 edition = "2021"
 
