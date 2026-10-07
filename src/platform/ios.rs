@@ -79,6 +79,13 @@
 
 use std::os::raw::c_void;
 
+#[cfg(feature = "ios-attach")]
+use objc2_foundation::MainThreadMarker;
+
+#[cfg(feature = "ios-attach")]
+use crate::application::ApplicationHandler;
+#[cfg(feature = "ios-attach")]
+use crate::event_loop::dispatch_event_for_app;
 use crate::event_loop::EventLoop;
 use crate::monitor::{MonitorHandle, VideoModeHandle};
 use crate::window::{Window, WindowAttributes};
@@ -93,6 +100,40 @@ impl<T: 'static> EventLoopExtIOS for EventLoop<T> {
     fn idiom(&self) -> Idiom {
         self.event_loop.idiom()
     }
+}
+
+/// Runs an [`EventLoop`] on a `UIApplication` that already runs.
+#[cfg(feature = "ios-attach")]
+pub trait EventLoopExtIOSAttach<T: 'static> {
+    /// Starts the app and returns. The caller owns `UIApplicationMain` and its run loop,
+    /// for example a loader that loads the app as a dynamic library.
+    fn run_app_attached<A: ApplicationHandler<T> + 'static>(self, app: &'static mut A);
+}
+
+#[cfg(feature = "ios-attach")]
+impl<T: 'static> EventLoopExtIOSAttach<T> for EventLoop<T> {
+    fn run_app_attached<A: ApplicationHandler<T> + 'static>(self, app: &'static mut A) {
+        self.event_loop.run_attached(move |event, event_loop| {
+            dispatch_event_for_app(app, event_loop, event);
+        });
+    }
+}
+
+/// Takes the event loop of [`EventLoopExtIOSAttach::run_app_attached`] out of the running app.
+///
+/// Drop every [`Window`] first. Not from inside an event callback.
+#[cfg(feature = "ios-attach")]
+pub fn detach() {
+    let mtm = MainThreadMarker::new().expect("`detach` runs on the main thread");
+    crate::platform_impl::detach(mtm);
+}
+
+/// Deletes the Objective-C classes of winit when their objects are gone, and says whether it
+/// did. Call it after [`detach`], again and again until it is true.
+#[cfg(feature = "ios-attach")]
+pub fn release_classes() -> bool {
+    let mtm = MainThreadMarker::new().expect("`release_classes` runs on the main thread");
+    crate::platform_impl::release_classes(mtm)
 }
 
 /// Additional methods on [`Window`] that are specific to iOS.

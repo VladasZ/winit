@@ -1,8 +1,18 @@
 #![allow(clippy::unnecessary_cast)]
 
+#[cfg(feature = "ios-attach")]
+use std::cell::RefCell;
 use std::collections::VecDeque;
+#[cfg(feature = "ios-attach")]
+use std::ptr;
 
+#[cfg(feature = "ios-attach")]
+use objc2::ffi::objc_disposeClassPair;
 use objc2::rc::Retained;
+#[cfg(feature = "ios-attach")]
+use objc2::rc::Weak;
+#[cfg(feature = "ios-attach")]
+use objc2::Message;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{class, declare_class, msg_send, msg_send_id, mutability, ClassType, DeclaredClass};
 use objc2_foundation::{
@@ -111,6 +121,51 @@ pub struct Inner {
     view_controller: Retained<WinitViewController>,
     view: Retained<WinitView>,
     gl_or_metal_backed: bool,
+}
+
+// A window that is only released stays on the screen, UIKit holds a visible window. A process
+// that goes on after its windows needs them gone.
+#[cfg(feature = "ios-attach")]
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.window.setHidden(true);
+        self.window.setRootViewController(None);
+    }
+}
+
+#[cfg(feature = "ios-attach")]
+thread_local! {
+    // One check per object of the 3 winit classes, true while the object lives.
+    static LIVE_OBJECTS: RefCell<Vec<Box<dyn Fn() -> bool>>> = const { RefCell::new(Vec::new()) };
+}
+
+#[cfg(feature = "ios-attach")]
+fn track<T: Message + mutability::IsIdCloneable + 'static>(object: &Retained<T>) {
+    let weak = Weak::from_retained(object);
+    LIVE_OBJECTS.with_borrow_mut(|objects| objects.push(Box::new(move || weak.load().is_some())));
+}
+
+/// Deletes the 3 classes of winit once every window, view and view controller is gone, and
+/// says whether it did. A second copy of winit in the same process can then register them
+/// again. UIKit holds a hidden window for a moment, so the caller asks again until this is true.
+#[cfg(feature = "ios-attach")]
+pub(crate) fn release_classes(_mtm: MainThreadMarker) -> bool {
+    let alive = LIVE_OBJECTS.with_borrow(|objects| objects.iter().any(|alive| alive()));
+    if alive {
+        return false;
+    }
+
+    LIVE_OBJECTS.with_borrow_mut(|objects| {
+        // An empty list after a delete means the classes are deleted already.
+        if objects.is_empty() {
+            return;
+        }
+        objects.clear();
+        for class in [WinitUIWindow::class(), WinitViewController::class(), WinitView::class()] {
+            unsafe { objc_disposeClassPair(ptr::from_ref(class).cast_mut().cast()) };
+        }
+    });
+    true
 }
 
 impl Inner {
@@ -527,6 +582,13 @@ impl Window {
 
         let view_controller = WinitViewController::new(mtm, &window_attributes, &view);
         let window = WinitUIWindow::new(mtm, &window_attributes, frame, &view_controller);
+
+        #[cfg(feature = "ios-attach")]
+        {
+            track(&window);
+            track(&view_controller);
+            track(&view);
+        }
 
         app_state::set_key_window(mtm, &window);
 

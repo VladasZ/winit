@@ -1,3 +1,5 @@
+#[cfg(feature = "ios-attach")]
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void};
 use std::marker::PhantomData;
@@ -5,6 +7,8 @@ use std::ptr::{self, NonNull};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use core_foundation::base::{CFIndex, CFRelease};
+#[cfg(feature = "ios-attach")]
+use core_foundation::runloop::CFRunLoopObserverInvalidate;
 use core_foundation::runloop::{
     kCFRunLoopAfterWaiting, kCFRunLoopBeforeWaiting, kCFRunLoopCommonModes, kCFRunLoopDefaultMode,
     kCFRunLoopExit, CFRunLoopActivity, CFRunLoopAddObserver, CFRunLoopAddSource, CFRunLoopGetMain,
@@ -12,7 +16,11 @@ use core_foundation::runloop::{
     CFRunLoopSourceInvalidate, CFRunLoopSourceRef, CFRunLoopSourceSignal, CFRunLoopWakeUp,
 };
 use objc2::rc::Retained;
+#[cfg(feature = "ios-attach")]
+use objc2::msg_send;
 use objc2::{msg_send_id, ClassType};
+#[cfg(feature = "ios-attach")]
+use objc2_foundation::NSInteger;
 use objc2_foundation::{MainThreadMarker, NSNotificationCenter, NSObject};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDidBecomeActiveNotification,
@@ -152,6 +160,37 @@ pub struct EventLoop<T: 'static> {
     _did_receive_memory_warning_observer: Retained<NSObject>,
 }
 
+#[cfg(feature = "ios-attach")]
+thread_local! {
+    static ATTACHED_OBSERVERS: RefCell<Vec<Retained<NSObject>>> =
+        const { RefCell::new(Vec::new()) };
+    static CONTROL_FLOW_OBSERVERS: RefCell<Vec<CFRunLoopObserverRef>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// Takes an attached loop out of the running app: the handler, the run loop observers and the
+/// notification observers. Not from inside an event callback, the handler is in use there.
+#[cfg(feature = "ios-attach")]
+pub(crate) fn detach(mtm: MainThreadMarker) {
+    app_state::detach(mtm);
+
+    CONTROL_FLOW_OBSERVERS.with_borrow_mut(|observers| {
+        for observer in observers.drain(..) {
+            unsafe {
+                CFRunLoopObserverInvalidate(observer);
+                CFRelease(observer as _);
+            }
+        }
+    });
+
+    let center = unsafe { NSNotificationCenter::defaultCenter() };
+    ATTACHED_OBSERVERS.with_borrow_mut(|observers| {
+        for observer in observers.drain(..) {
+            unsafe { center.removeObserver(&observer) };
+        }
+    });
+}
+
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PlatformSpecificEventLoopAttributes {}
 
@@ -183,7 +222,10 @@ impl<T: 'static> EventLoop<T> {
             // `application:didFinishLaunchingWithOptions:`
             unsafe { UIApplicationDidFinishLaunchingNotification },
             move |_| {
-                app_state::did_finish_launching(mtm);
+                // An attached loop has launched by itself, see `run_attached`.
+                if !app_state::is_attached() {
+                    app_state::did_finish_launching(mtm);
+                }
             },
         );
         let _did_become_active_observer = create_observer(
@@ -313,6 +355,64 @@ impl<T: 'static> EventLoop<T> {
             )
         };
         unreachable!()
+    }
+
+    /// Runs on a `UIApplication` that someone else started, and returns.
+    ///
+    /// The launch of the app is over when this is called, or is over before its
+    /// notification comes, so the loop goes through the launch states by itself.
+    #[cfg(feature = "ios-attach")]
+    pub fn run_attached<F>(self, handler: F)
+    where
+        F: FnMut(Event<T>, &RootActiveEventLoop) + 'static,
+    {
+        let application: Option<Retained<UIApplication>> =
+            unsafe { msg_send_id![UIApplication::class(), sharedApplication] };
+        let application =
+            application.expect("`run_attached` needs a `UIApplication` that already runs");
+
+        let Self {
+            mtm,
+            sender: _,
+            receiver,
+            window_target,
+            _did_finish_launching_observer,
+            _did_become_active_observer,
+            _will_resign_active_observer,
+            _will_enter_foreground_observer,
+            _did_enter_background_observer,
+            _will_terminate_observer,
+            _did_receive_memory_warning_observer,
+        } = self;
+
+        // `run` never returns and so keeps the observers alive, here they need a home.
+        ATTACHED_OBSERVERS.with_borrow_mut(|observers| {
+            observers.extend([
+                _did_finish_launching_observer,
+                _did_become_active_observer,
+                _will_resign_active_observer,
+                _will_enter_foreground_observer,
+                _did_enter_background_observer,
+                _will_terminate_observer,
+                _did_receive_memory_warning_observer,
+            ]);
+        });
+
+        let handler = EventLoopHandler {
+            handler: Box::new(map_user_event(handler, receiver)),
+            event_loop: window_target,
+        };
+
+        app_state::set_attached();
+        app_state::will_launch(mtm, handler);
+        app_state::did_finish_launching(mtm);
+
+        // iOS says that an app became active only once. An app that is active
+        // already would wait for `Resumed` forever. `UIApplicationStateActive` is 0.
+        let state: NSInteger = unsafe { msg_send![&application, applicationState] };
+        if state == 0 {
+            app_state::handle_nonuser_event(mtm, EventWrapper::StaticEvent(Event::Resumed));
+        }
     }
 
     pub fn create_proxy(&self) -> EventLoopProxy<T> {
@@ -490,5 +590,10 @@ fn setup_control_flow_observers() {
             ptr::null_mut(),
         );
         CFRunLoopAddObserver(main_loop, end_observer, kCFRunLoopDefaultMode);
+
+        #[cfg(feature = "ios-attach")]
+        CONTROL_FLOW_OBSERVERS.with_borrow_mut(|observers| {
+            observers.extend([begin_observer, main_end_observer, end_observer]);
+        });
     }
 }

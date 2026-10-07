@@ -3,6 +3,7 @@
 use std::cell::{RefCell, RefMut};
 use std::collections::HashSet;
 use std::os::raw::c_void;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use std::{fmt, mem, ptr};
@@ -455,6 +456,36 @@ pub(crate) fn queue_gl_or_metal_redraw(mtm: MainThreadMarker, window: Retained<W
     }
 }
 
+static ATTACHED: AtomicBool = AtomicBool::new(false);
+
+/// True when the loop runs on a `UIApplication` it did not start.
+pub(crate) fn is_attached() -> bool {
+    ATTACHED.load(Ordering::Relaxed)
+}
+
+#[cfg(feature = "ios-attach")]
+pub(crate) fn set_attached() {
+    ATTACHED.store(true, Ordering::Relaxed);
+}
+
+/// Ends an attached loop. The state stays `Terminated`, so a late call of UIKit into a view
+/// of this loop is ignored.
+#[cfg(feature = "ios-attach")]
+pub(crate) fn detach(mtm: MainThreadMarker) {
+    let mut this = AppState::get_mut(mtm);
+    let mut handler = match this.replace_state(AppStateImpl::Terminated) {
+        AppStateImpl::ProcessingEvents { handler, .. }
+        | AppStateImpl::ProcessingRedraws { handler, .. } => handler,
+        AppStateImpl::Waiting { waiting_handler, .. }
+        | AppStateImpl::PollFinished { waiting_handler } => waiting_handler,
+        s => bug!("`detach` in the state {:?}", s),
+    };
+    this.waker.invalidate();
+    drop(this);
+
+    handler.handle_event(Event::LoopExiting);
+}
+
 pub(crate) fn will_launch(mtm: MainThreadMarker, queued_handler: EventLoopHandler) {
     AppState::get_mut(mtm).will_launch_transition(queued_handler)
 }
@@ -816,6 +847,13 @@ impl EventLoopWaker {
 
     fn stop(&mut self) {
         unsafe { CFRunLoopTimerSetNextFireDate(self.timer, f64::MAX) }
+    }
+
+    // The waker lives in a static and is never dropped, so a detached loop takes its timer
+    // out of the run loop here.
+    #[cfg(feature = "ios-attach")]
+    fn invalidate(&mut self) {
+        unsafe { CFRunLoopTimerInvalidate(self.timer) }
     }
 
     fn start(&mut self) {

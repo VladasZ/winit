@@ -1,6 +1,6 @@
 [package]
 name = "hilen-winit"
-version = "0.30.13"
+version = "0.30.14"
 authors = [
     "The winit contributors",
     "Pierre Krieger <pierre.krieger1708@gmail.com>",
@@ -72,6 +72,8 @@ wayland-dlopen = ["wayland-backend/dlopen"]
 wayland-csd-adwaita = ["sctk-adwaita", "sctk-adwaita/ab_glyph"]
 wayland-csd-adwaita-crossfont = ["sctk-adwaita", "sctk-adwaita/crossfont"]
 wayland-csd-adwaita-notitle = ["sctk-adwaita"]
+# iOS: `EventLoopExtIOSAttach`, the event loop on a `UIApplication` that already runs.
+ios-attach = []
 android-native-activity = ["android-activity/native-activity"]
 android-game-activity = ["android-activity/game-activity"]
 serde = ["dep:serde", "cursor-icon/serde", "smol_str/serde", "dpi/serde"]
