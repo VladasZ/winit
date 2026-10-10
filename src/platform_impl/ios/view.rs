@@ -11,6 +11,8 @@ use objc2_ui_kit::{
     UIPinchGestureRecognizer, UIResponder, UIRotationGestureRecognizer, UITapGestureRecognizer,
     UITextInputTraits, UITouch, UITouchPhase, UITouchType, UITraitEnvironment, UIView,
 };
+#[cfg(target_os = "tvos")]
+use objc2_ui_kit::{UIPress, UIPressesEvent};
 
 use super::app_state::{self, EventWrapper};
 use super::window::WinitUIWindow;
@@ -20,6 +22,24 @@ use crate::keyboard::{Key, KeyCode, KeyLocation, NamedKey, NativeKeyCode, Physic
 use crate::platform_impl::platform::DEVICE_ID;
 use crate::platform_impl::KeyEventExtra;
 use crate::window::{WindowAttributes, WindowId as RootWindowId};
+
+/// The key a button of the remote of an Apple TV stands for. Select is
+/// Enter and Menu, the Back button of a newer remote, is Escape.
+#[cfg(target_os = "tvos")]
+fn remote_key(press: objc2_ui_kit::UIPressType) -> Option<(NamedKey, KeyCode)> {
+    use objc2_ui_kit::UIPressType;
+
+    Some(match press {
+        UIPressType::UpArrow => (NamedKey::ArrowUp, KeyCode::ArrowUp),
+        UIPressType::DownArrow => (NamedKey::ArrowDown, KeyCode::ArrowDown),
+        UIPressType::LeftArrow => (NamedKey::ArrowLeft, KeyCode::ArrowLeft),
+        UIPressType::RightArrow => (NamedKey::ArrowRight, KeyCode::ArrowRight),
+        UIPressType::Select => (NamedKey::Enter, KeyCode::Enter),
+        UIPressType::Menu => (NamedKey::Escape, KeyCode::Escape),
+        UIPressType::PlayPause => (NamedKey::MediaPlayPause, KeyCode::MediaPlayPause),
+        _ => return None,
+    })
+}
 
 pub struct WinitViewState {
     pinch_gesture_recognizer: RefCell<Option<Retained<UIPinchGestureRecognizer>>>,
@@ -166,6 +186,32 @@ declare_class!(
         #[method(touchesCancelled:withEvent:)]
         fn touches_cancelled(&self, touches: &NSSet<UITouch>, _event: Option<&UIEvent>) {
             self.handle_touches(touches)
+        }
+
+        // The buttons of the remote of an Apple TV arrive as presses, no
+        // touch and no key input carries them.
+        #[cfg(target_os = "tvos")]
+        #[method(pressesBegan:withEvent:)]
+        fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !self.handle_presses(presses, ElementState::Pressed) {
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[cfg(target_os = "tvos")]
+        #[method(pressesEnded:withEvent:)]
+        fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !self.handle_presses(presses, ElementState::Released) {
+                let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+            }
+        }
+
+        #[cfg(target_os = "tvos")]
+        #[method(pressesCancelled:withEvent:)]
+        fn presses_cancelled(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !self.handle_presses(presses, ElementState::Released) {
+                let _: () = unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+            }
         }
 
         #[method(pinchGesture:)]
@@ -538,6 +584,44 @@ impl WinitView {
         }
         let mtm = MainThreadMarker::new().unwrap();
         app_state::handle_nonuser_events(mtm, touch_events);
+    }
+
+    /// Sends the presses of a remote as key events. Answers false and sends
+    /// nothing when a press has no key, that press stays with the system.
+    #[cfg(target_os = "tvos")]
+    fn handle_presses(&self, presses: &NSSet<UIPress>, state: ElementState) -> bool {
+        let mut keys = Vec::new();
+        for press in presses {
+            match remote_key(unsafe { press.r#type() }) {
+                Some(key) => keys.push(key),
+                None => return false,
+            }
+        }
+        let window = self.window().unwrap();
+        let window_id = RootWindowId(window.id());
+        let mtm = MainThreadMarker::new().unwrap();
+        app_state::handle_nonuser_events(
+            mtm,
+            keys.into_iter().map(|(logical, physical)| {
+                EventWrapper::StaticEvent(Event::WindowEvent {
+                    window_id,
+                    event: WindowEvent::KeyboardInput {
+                        device_id: DEVICE_ID,
+                        event: KeyEvent {
+                            state,
+                            logical_key: Key::Named(logical),
+                            physical_key: PhysicalKey::Code(physical),
+                            platform_specific: KeyEventExtra {},
+                            repeat: false,
+                            location: KeyLocation::Standard,
+                            text: None,
+                        },
+                        is_synthetic: false,
+                    },
+                })
+            }),
+        );
+        true
     }
 
     fn handle_insert_text(&self, text: &NSString) {

@@ -1,6 +1,6 @@
 [package]
 name = "hilen-winit"
-version = "0.30.14"
+version = "0.30.15"
 authors = [
     "The winit contributors",
     "Pierre Krieger <pierre.krieger1708@gmail.com>",
@@ -208,6 +208,8 @@ features = [
     "UIOrientation",
     "UIPanGestureRecognizer",
     "UIPinchGestureRecognizer",
+    "UIPress",
+    "UIPressesEvent",
     "UIResponder",
     "UIRotationGestureRecognizer",
     "UIScreen",
