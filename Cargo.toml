@@ -1,6 +1,6 @@
 [package]
 name = "hilen-winit"
-version = "0.30.15"
+version = "0.30.16"
 authors = [
     "The winit contributors",
     "Pierre Krieger <pierre.krieger1708@gmail.com>",

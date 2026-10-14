@@ -961,6 +961,7 @@ impl WinitView {
                     platform_specific: KeyEventExtra {
                         text_with_all_modifiers: None,
                         key_without_modifiers: logical_key.clone(),
+                        latin_key: None,
                     },
                 };
 

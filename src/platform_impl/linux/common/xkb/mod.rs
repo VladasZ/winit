@@ -198,8 +198,10 @@ impl KeyContext<'_> {
         let text = event.text();
         let (key_without_modifiers, _) = event.key_without_modifiers();
         let text_with_all_modifiers = event.text_with_all_modifiers();
+        let latin_key = event.latin_key();
 
-        let platform_specific = KeyEventExtra { text_with_all_modifiers, key_without_modifiers };
+        let platform_specific =
+            KeyEventExtra { text_with_all_modifiers, key_without_modifiers, latin_key };
 
         KeyEvent { physical_key, logical_key, text, location, state, repeat, platform_specific }
     }
@@ -302,6 +304,14 @@ impl<'a, 'b> KeyEventResults<'a, 'b> {
                 (key, location)
             },
         }
+    }
+
+    pub fn latin_key(&mut self) -> Option<SmolStr> {
+        let layout = self.context.state.layout(self.keycode);
+        let keysym = self.context.keymap.latin_keysym(layout, self.keycode)?;
+        // A printable ASCII keysym is the code point of its character.
+        let ch = char::from_u32(keysym)?.to_ascii_lowercase();
+        Some(SmolStr::new(ch.encode_utf8(&mut [0; 4])))
     }
 
     fn keysym_to_key(&self, keysym: u32) -> Result<(Key, KeyLocation), (Key, KeyLocation)> {

@@ -442,6 +442,7 @@ impl KeyEventBuilder {
             vkey: vk,
             logical_key: PartialLogicalKey::This(logical_key.clone()),
             key_without_modifiers,
+            latin_key: latin_key_of_vkey(vk),
             key_state,
             is_repeat: false,
             physical_key,
@@ -483,6 +484,8 @@ struct PartialKeyEventInfo {
     logical_key: PartialLogicalKey,
 
     key_without_modifiers: Key,
+
+    latin_key: Option<SmolStr>,
 
     /// The UTF-16 code units of the text that was produced by the keypress event.
     /// This take all modifiers into account. Including CTRL
@@ -576,6 +579,7 @@ impl PartialKeyEventInfo {
             key_state: state,
             logical_key,
             key_without_modifiers,
+            latin_key: latin_key_of_vkey(vkey),
             is_repeat: lparam_struct.is_repeat,
             physical_key,
             location,
@@ -633,8 +637,21 @@ impl PartialKeyEventInfo {
             platform_specific: KeyEventExtra {
                 text_with_all_modifiers: char_with_all_modifiers,
                 key_without_modifiers: self.key_without_modifiers,
+                latin_key: self.latin_key,
             },
         }
+    }
+}
+
+/// The virtual key codes of the letter and digit keys are the ASCII codes of their Latin labels on
+/// every layout, also on one that types other letters.
+fn latin_key_of_vkey(vkey: VIRTUAL_KEY) -> Option<SmolStr> {
+    match vkey {
+        0x30..=0x39 | 0x41..=0x5a => {
+            let ch = char::from(vkey as u8).to_ascii_lowercase();
+            Some(SmolStr::new(ch.encode_utf8(&mut [0; 4])))
+        },
+        _ => None,
     }
 }
 

@@ -995,6 +995,35 @@ impl XkbKeymap {
         }
     }
 
+    /// The printable ASCII keysym of the key in the first installed layout other than `current`
+    /// that has one, the way Qt finds a shortcut key on a non-Latin layout.
+    ///
+    /// With `us(dvorak),ru,us` and `ru` active, the physical X key gives `q` through Dvorak, so
+    /// the physical Q key must not give `q` through the later plain `us`. A keysym that a layout
+    /// earlier in the list gives on any key is therefore refused.
+    pub fn latin_keysym(
+        &mut self,
+        current: xkb_layout_index_t,
+        keycode: xkb_keycode_t,
+    ) -> Option<xkb_keysym_t> {
+        let is_ascii = |keysym: xkb_keysym_t| (0x21..=0x7e).contains(&keysym);
+        let layouts =
+            unsafe { (XKBH.xkb_keymap_num_layouts_for_key)(self.keymap.as_ptr(), keycode) };
+        let (layout, keysym) = (0..layouts)
+            .filter(|&layout| layout != current)
+            .map(|layout| (layout, self.first_keysym_by_level(layout, keycode)))
+            .find(|&(_, keysym)| is_ascii(keysym))?;
+
+        let min = unsafe { (XKBH.xkb_keymap_min_keycode)(self.keymap.as_ptr()) };
+        let max = unsafe { (XKBH.xkb_keymap_max_keycode)(self.keymap.as_ptr()) };
+        for earlier in 0..layout {
+            if (min..=max).any(|code| self.first_keysym_by_level(earlier, code) == keysym) {
+                return None;
+            }
+        }
+        Some(keysym)
+    }
+
     /// Check whether the given key repeats.
     pub fn key_repeats(&mut self, keycode: xkb_keycode_t) -> bool {
         unsafe { (XKBH.xkb_keymap_key_repeats)(self.keymap.as_ptr(), keycode) == 1 }

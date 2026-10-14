@@ -18,10 +18,28 @@ use crate::platform_impl::platform::ffi;
 pub struct KeyEventExtra {
     pub text_with_all_modifiers: Option<SmolStr>,
     pub key_without_modifiers: Key,
+    pub latin_key: Option<SmolStr>,
 }
 
 /// Ignores ALL modifiers.
 pub fn get_modifierless_char(scancode: u16) -> Key {
+    translate_key(scancode, 0)
+}
+
+/// The character of the key with Cmd held. A non-Latin layout gives Latin letters there, which
+/// is how a menu shortcut works on it.
+fn get_command_char(scancode: u16) -> Option<SmolStr> {
+    // `cmdKey` of the Carbon event modifiers, shifted right by 8 as `UCKeyTranslate` takes it.
+    const CMD_KEY: u32 = 1;
+    match translate_key(scancode, CMD_KEY) {
+        Key::Character(text) if text.chars().all(|ch| ch.is_ascii_graphic()) => {
+            Some(SmolStr::new(text.to_ascii_lowercase()))
+        },
+        _ => None,
+    }
+}
+
+fn translate_key(scancode: u16, modifiers: u32) -> Key {
     let mut string = [0; 16];
     let input_source;
     let layout;
@@ -44,7 +62,6 @@ pub fn get_modifierless_char(scancode: u16) -> Key {
 
     let mut result_len = 0;
     let mut dead_keys = 0;
-    let modifiers = 0;
     let translate_result = unsafe {
         ffi::UCKeyTranslate(
             layout,
@@ -118,6 +135,11 @@ pub(crate) fn create_key_event(ns_event: &NSEvent, is_press: bool, is_repeat: bo
     };
 
     let key_from_code = code_to_key(physical_key, scancode);
+    let latin_key = if matches!(key_from_code, Key::Unidentified(_)) {
+        get_command_char(scancode)
+    } else {
+        None
+    };
     let (logical_key, key_without_modifiers) = if matches!(key_from_code, Key::Unidentified(_)) {
         // `get_modifierless_char/key_without_modifiers` ignores ALL modifiers.
         let key_without_modifiers = get_modifierless_char(scancode);
@@ -162,7 +184,11 @@ pub(crate) fn create_key_event(ns_event: &NSEvent, is_press: bool, is_repeat: bo
         repeat: is_repeat,
         state,
         text,
-        platform_specific: KeyEventExtra { text_with_all_modifiers, key_without_modifiers },
+        platform_specific: KeyEventExtra {
+            text_with_all_modifiers,
+            key_without_modifiers,
+            latin_key,
+        },
     }
 }
 
