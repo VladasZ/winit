@@ -9,7 +9,8 @@ use objc2_ui_kit::{
     UICoordinateSpace, UIEvent, UIForceTouchCapability, UIGestureRecognizer,
     UIGestureRecognizerDelegate, UIGestureRecognizerState, UIKeyInput, UIPanGestureRecognizer,
     UIPinchGestureRecognizer, UIResponder, UIRotationGestureRecognizer, UITapGestureRecognizer,
-    UITextInputTraits, UITouch, UITouchPhase, UITouchType, UITraitEnvironment, UIView,
+    UITextInputTraits, UITouch, UITouchPhase, UITouchType, UITraitCollection, UITraitEnvironment,
+    UIUserInterfaceStyle, UIView,
 };
 #[cfg(target_os = "tvos")]
 use objc2_ui_kit::{UIPress, UIPressesEvent};
@@ -21,7 +22,7 @@ use crate::event::{ElementState, Event, Force, KeyEvent, Touch, TouchPhase, Wind
 use crate::keyboard::{Key, KeyCode, KeyLocation, NamedKey, NativeKeyCode, PhysicalKey};
 use crate::platform_impl::platform::DEVICE_ID;
 use crate::platform_impl::KeyEventExtra;
-use crate::window::{WindowAttributes, WindowId as RootWindowId};
+use crate::window::{Theme, WindowAttributes, WindowId as RootWindowId};
 
 /// The key a button of the remote of an Apple TV stands for. Select is
 /// Enter and Menu, the Back button of a newer remote, is Escape.
@@ -39,6 +40,14 @@ fn remote_key(press: objc2_ui_kit::UIPressType) -> Option<(NamedKey, KeyCode)> {
         UIPressType::PlayPause => (NamedKey::MediaPlayPause, KeyCode::MediaPlayPause),
         _ => return None,
     })
+}
+
+fn theme_of(style: UIUserInterfaceStyle) -> Theme {
+    if style == UIUserInterfaceStyle::Dark {
+        Theme::Dark
+    } else {
+        Theme::Light
+    }
 }
 
 pub struct WinitViewState {
@@ -112,6 +121,30 @@ declare_class!(
                 EventWrapper::StaticEvent(Event::WindowEvent {
                     window_id: RootWindowId(window.id()),
                     event: WindowEvent::Resized(size),
+                }),
+            );
+        }
+
+        // The system theme changed, by a switch in Settings or by the time
+        // of day. `traitCollectionDidChange:` is deprecated since iOS 17
+        // but still called, and the replacement needs iOS 17.
+        #[method(traitCollectionDidChange:)]
+        fn trait_collection_did_change(&self, previous: Option<&UITraitCollection>) {
+            let mtm = MainThreadMarker::new().unwrap();
+            let _: () = unsafe { msg_send![super(self), traitCollectionDidChange: previous] };
+
+            let style = unsafe { self.traitCollection().userInterfaceStyle() };
+            if previous.map(|previous| unsafe { previous.userInterfaceStyle() }) == Some(style) {
+                return;
+            }
+            let Some(window) = self.window() else {
+                return;
+            };
+            app_state::handle_nonuser_event(
+                mtm,
+                EventWrapper::StaticEvent(Event::WindowEvent {
+                    window_id: RootWindowId(window.id()),
+                    event: WindowEvent::ThemeChanged(theme_of(style)),
                 }),
             );
         }
@@ -424,6 +457,10 @@ impl WinitView {
         }
 
         this
+    }
+
+    pub(crate) fn theme(&self) -> Theme {
+        theme_of(unsafe { self.traitCollection().userInterfaceStyle() })
     }
 
     fn window(&self) -> Option<Retained<WinitUIWindow>> {

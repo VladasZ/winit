@@ -1,6 +1,6 @@
 [package]
 name = "hilen-winit"
-version = "0.30.16"
+version = "0.30.17"
 authors = [
     "The winit contributors",
     "Pierre Krieger <pierre.krieger1708@gmail.com>",
@@ -203,6 +203,7 @@ features = [
     "UIEvent",
     "UIGeometry",
     "UIGestureRecognizer",
+    "UIInterface",
     "UITextInput",
     "UITextInputTraits",
     "UIOrientation",

@@ -507,8 +507,7 @@ impl Inner {
     }
 
     pub fn theme(&self) -> Option<Theme> {
-        warn!("`Window::theme` is ignored on iOS");
-        None
+        Some(self.view.theme())
     }
 
     pub fn set_content_protected(&self, _protected: bool) {}
